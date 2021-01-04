@@ -30,6 +30,9 @@ import static java.util.Objects.requireNonNull;
 
 import org.apache.carbondata.hadoop.api.CarbonTableInputFormat;
 import org.apache.carbondata.hadoop.api.CarbonTableOutputFormat;
+import org.apache.carbondata.hive.CarbonHiveSerDe;
+import org.apache.carbondata.hive.MapredCarbonInputFormat;
+import org.apache.carbondata.hive.MapredCarbonOutputFormat;
 import org.apache.carbondata.presto.impl.CarbonTableConfig;
 
 import com.facebook.presto.hive.HiveAnalyzeProperties;
@@ -60,6 +63,7 @@ import com.facebook.presto.spi.connector.ConnectorNodePartitioningProvider;
 import com.facebook.presto.spi.connector.ConnectorPageSinkProvider;
 import com.facebook.presto.spi.connector.ConnectorPageSourceProvider;
 import com.facebook.presto.spi.connector.ConnectorSplitManager;
+import com.facebook.presto.spi.connector.ConnectorHandleResolver;
 import com.facebook.presto.spi.connector.classloader.ClassLoaderSafeConnectorPageSinkProvider;
 import com.facebook.presto.spi.connector.classloader.ClassLoaderSafeConnectorPageSourceProvider;
 import com.facebook.presto.spi.connector.classloader.ClassLoaderSafeConnectorSplitManager;
@@ -80,6 +84,7 @@ import sun.reflect.ConstructorAccessor;
 
 import static com.google.common.base.Throwables.throwIfUnchecked;
 import static io.airlift.configuration.ConfigBinder.configBinder;
+
 
 /**
  * Build Carbondata Connector
@@ -161,15 +166,16 @@ public class CarbondataConnectorFactory extends HiveConnectorFactory {
   /**
    * Set the Carbon format enum to HiveStorageFormat, its a hack but for time being it is best
    * choice to avoid lot of code change.
-   *
-   * @throws Exception
    */
-  private void setCarbonEnum() throws Exception {
-    for (HiveStorageFormat format : HiveStorageFormat.values()) {
-      if (format.name().equals("CARBON")) {
-        return;
-      }
-    }
+  private static void setCarbonEnum() throws Exception {
+    addHiveStorageFormatsForCarbondata("CARBON");
+    addHiveStorageFormatsForCarbondata("ORG.APACHE.CARBONDATA.FORMAT");
+    addHiveStorageFormatsForCarbondata("CARBONDATA");
+  }
+
+  private static void addHiveStorageFormatsForCarbondata(String storedAs)
+      throws InstantiationException, InvocationTargetException, NoSuchFieldException,
+      IllegalAccessException, NoSuchMethodException {
     Constructor<?>[] declaredConstructors = HiveStorageFormat.class.getDeclaredConstructors();
     declaredConstructors[0].setAccessible(true);
     Field constructorAccessorField = Constructor.class.getDeclaredField("constructorAccessor");
@@ -182,9 +188,9 @@ public class CarbondataConnectorFactory extends HiveConnectorFactory {
       acquireConstructorAccessorMethod.setAccessible(true);
       ca = (ConstructorAccessor) acquireConstructorAccessorMethod.invoke(declaredConstructors[0]);
     }
-    Object instance = ca.newInstance(new Object[] { "CARBON", HiveStorageFormat.values().length, "",
-        CarbonTableInputFormat.class.getName(), CarbonTableOutputFormat.class.getName(),
-        new DataSize(256.0D, DataSize.Unit.MEGABYTE) });
+    Object instance = ca.newInstance(new Object[] { storedAs, HiveStorageFormat.values().length,
+        CarbonHiveSerDe.class.getName(), MapredCarbonInputFormat.class.getName(),
+        MapredCarbonOutputFormat.class.getName(), new DataSize(256.0D, DataSize.Unit.MEGABYTE) });
     Field values = HiveStorageFormat.class.getDeclaredField("$VALUES");
     values.setAccessible(true);
     Field modifiersField = Field.class.getDeclaredField("modifiers");
@@ -197,5 +203,10 @@ public class CarbondataConnectorFactory extends HiveConnectorFactory {
     System.arraycopy(src, 0, hiveStorageFormats, 0, src.length);
     hiveStorageFormats[src.length] = (HiveStorageFormat) instance;
     values.set(null, hiveStorageFormats);
+  }
+
+  @Override
+  public ConnectorHandleResolver getHandleResolver() {
+    return new CarbonDataHandleResolver();
   }
 }
